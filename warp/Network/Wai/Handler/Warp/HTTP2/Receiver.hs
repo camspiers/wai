@@ -216,9 +216,21 @@ guardIt x = case x of
     Left err    -> E.throwIO err
     Right frame -> return frame
 
+checkPriority :: Priority -> Int -> IO ()
+checkPriority p n
+  | dep == me = E.throwIO $ StreamError ProtocolError me
+  | otherwise = return ()
+  where
+    dep = streamDependency p
+    me  = toStreamIdentifier n
+
 stream :: FrameTypeId -> FrameHeader -> ByteString -> Context -> StreamState -> Stream -> IO StreamState
-stream FrameHeaders header@FrameHeader{..} bs ctx Idle _ = do
-    HeadersFrame _ frag <- guardIt $ decodeHeadersFrame header bs
+stream FrameHeaders header@FrameHeader{..} bs ctx Idle Stream{..} = do
+    HeadersFrame mp frag <- guardIt $ decodeHeadersFrame header bs
+    case mp of
+        Nothing -> return ()
+        Just p  -> do
+            checkPriority p streamNumber
     let endOfStream = testEndStream flags
         endOfHeader = testEndHeader flags
     if endOfHeader then do
@@ -268,6 +280,11 @@ stream FrameWindowUpdate header@FrameHeader{..} bs Context{..} s Stream{..} = do
 stream FrameRSTStream header bs _ _ Stream{..} = do
     RSTStreamFrame e <- guardIt $ decoderstStreamFrame header bs
     return $ Closed (Reset e) -- will be written to streamState
+
+stream FramePriority header bs _ s Stream{..} = do
+    PriorityFrame p <- guardIt $ decodePriorityFrame header bs
+    checkPriority p streamNumber
+    return s
 
     -- this ordering is important
 stream _ _ _ _ (Continued _ _) _ = E.throwIO $ ConnectionError ProtocolError "an illegal frame follows header/continuation frames"
