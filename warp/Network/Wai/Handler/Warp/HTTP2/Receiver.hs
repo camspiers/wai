@@ -233,6 +233,7 @@ stream FrameData header@FrameHeader{..} bs _ s@(Body q) Stream{..} = do
     len0 <- readIORef streamBodyLength
     let !len = len0 + payloadLength
     writeIORef streamBodyLength len
+    -- fixme: sending window update frame both for connection and stream
     atomically $ writeTQueue q body
     if endOfStream then do
         mcl <- readIORef streamContentLength
