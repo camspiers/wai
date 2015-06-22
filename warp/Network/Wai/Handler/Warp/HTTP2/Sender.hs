@@ -59,7 +59,7 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
     switch (OFrame frame) = do
         connSendAll frame
         loop
-    switch out@(OResponse strm rsp) = unlessClosed strm $
+    switch out@(OResponse strm rsp) = unlessClosed strm $ do
         checkWindowSize connectionWindow (streamWindow strm) outputQ out $ \lim -> do
             -- Header frame
             let sid = streamNumber strm
@@ -71,11 +71,13 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
                 datPayloadOff = otherLen + frameHeaderLength
             Next datPayloadLen mnext <- responseToNext conn ii datPayloadOff lim rsp
             fillSend strm otherLen datPayloadLen mnext
+        loop
     switch out@(ONext strm curr) = unlessClosed strm $ do
         checkWindowSize connectionWindow (streamWindow strm) outputQ out $ \lim -> do
             -- Data frame
             Next datPayloadLen mnext <- curr lim
             fillSend strm 0 datPayloadLen mnext
+        loop
     fillSend strm otherLen datPayloadLen mnext = do
         -- fixme: length check
         let sid = streamNumber strm
@@ -88,12 +90,8 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
            modifyTVar' connectionWindow (subtract datPayloadLen)
            modifyTVar' (streamWindow strm) (subtract datPayloadLen)
         case mnext of
-            Nothing   -> do
-                writeIORef (streamState strm) (Closed Finished)
-                loop
-            Just next -> do
-                atomically $ writeTQueue outputQ (ONext strm next)
-                loop
+            Nothing   -> writeIORef (streamState strm) (Closed Finished)
+            Just next -> atomically $ writeTQueue outputQ (ONext strm next)
     dataFrameHeadr len sid mnext = encodeFrameHeader FrameData hinfo
       where
         hinfo = FrameHeader len flag (toStreamIdentifier sid)
