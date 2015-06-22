@@ -29,7 +29,7 @@ unlessClosed :: Stream -> IO () -> IO ()
 unlessClosed Stream{..} body = do
     state <- readIORef streamState
     case state of
-        Closed _ -> print state
+        Closed _ -> return ()
         _        -> body
 
 checkWindowSize :: TVar WindowSize -> TVar WindowSize -> TQueue Output -> Output -> (WindowSize -> IO ()) -> IO ()
