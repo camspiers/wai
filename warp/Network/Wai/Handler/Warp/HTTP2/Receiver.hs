@@ -9,6 +9,7 @@ import Control.Concurrent.STM
 import qualified Control.Exception as E
 import Control.Monad (when, unless, void)
 import Data.ByteString (ByteString)
+import Data.Maybe (isJust)
 import qualified Data.ByteString as BS
 import qualified Data.IntMap.Strict as M
 import Network.Wai.Handler.Warp.HTTP2.Request
@@ -91,7 +92,7 @@ frameReceiver ctx@Context{..} mkreq src =
                   resetContinued
                   case validateHeaders hdr of
                       Just vh -> do
-                          when (vhCL vh /= Nothing && vhCL vh /= Just 0) $
+                          when (isJust (vhCL vh) && vhCL vh /= Just 0) $
                               E.throwIO $ StreamError ProtocolError streamId
                           writeIORef streamState HalfClosed
                           let req = mkreq vh (return "")

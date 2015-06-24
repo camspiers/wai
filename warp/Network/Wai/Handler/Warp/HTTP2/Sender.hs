@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards, OverloadedStrings, BangPatterns, ForeignFunctionInterface #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings, ForeignFunctionInterface #-}
 
 module Network.Wai.Handler.Warp.HTTP2.Sender (frameSender) where
 
@@ -40,7 +40,7 @@ checkWindowSize connWindow strmWindow outQ out pri body = do
        check (w > 0)
        return w
    sw <- atomically $ readTVar strmWindow
-   if sw == 0 then do
+   if sw == 0 then
        void $ forkIO $ do
            atomically $ do
                x <- readTVar strmWindow
