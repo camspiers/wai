@@ -259,8 +259,8 @@ stream FrameContinuation FrameHeader{..} frag ctx (Continued rfrags endOfStream 
     let endOfHeader = testEndHeader flags
         rfrags' = frag : rfrags
     if endOfHeader then do
-        let hdrblk = BS.concat $ reverse rfrags'
-        hdr <- decodeHeaderBlock hdrblk ctx
+        let hdrblk = BS.concat $ reverse rfrags' -- fixme
+        hdr <- decodeHeaderBlock hdrblk ctx -- fixme: so lazy ByteString?
         return $ if endOfStream then NoBody hdr pri else HasBody hdr pri
       else
         return $ Continued rfrags' endOfStream pri
