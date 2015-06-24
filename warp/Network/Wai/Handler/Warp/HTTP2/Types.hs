@@ -39,8 +39,9 @@ data Next = Next Int (Maybe (WindowSize -> IO Next))
 
 data Input = Input Stream Request Priority
 data Output = OFinish
+            | OGoaway ByteString
+            | OFrame  ByteString
             | OResponse Stream Response
-            | OFrame ByteString
             | ONext Stream (WindowSize -> IO Next)
 
 type StreamTable = IntMap Stream

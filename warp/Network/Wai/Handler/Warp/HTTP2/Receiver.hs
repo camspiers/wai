@@ -30,8 +30,7 @@ frameReceiver ctx@Context{..} mkreq src =
     sendGoaway (ConnectionError err msg) = do
         csid <- readIORef currentStreamId
         let frame = goawayFrame csid err msg
-        enqueue outputQ (OFrame frame) highestPriority
-        enqueue outputQ OFinish highestPriority
+        enqueue outputQ (OGoaway frame) highestPriority
     sendGoaway _                         = return ()
 
     sendReset err sid = do

@@ -57,8 +57,9 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
     initialSettings = [(SettingsMaxConcurrentStreams,recommendedConcurrency)]
     initialFrame = settingsFrame id initialSettings
     loop = dequeue outputQ >>= \(out, pri) -> switch out pri
-    switch OFinish        _ = return ()
-    switch (OFrame frame) _ = do
+    switch OFinish         _ = return ()
+    switch (OGoaway frame) _ = connSendAll frame
+    switch (OFrame frame)  _ = do
         connSendAll frame
         loop
     switch out@(OResponse strm rsp) pri = unlessClosed strm $ do
