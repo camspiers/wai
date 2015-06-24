@@ -54,7 +54,7 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
     connSendAll initialFrame
     loop `E.finally` putMVar wait ()
   where
-    initialSettings = [(SettingsMaxConcurrentStreams,defaultConcurrency)]
+    initialSettings = [(SettingsMaxConcurrentStreams,recommendedConcurrency)]
     initialFrame = settingsFrame id initialSettings
     loop = dequeue outputQ >>= \(out, pri) -> switch out pri
     switch OFinish        _ = return ()
@@ -96,7 +96,7 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
             Just next -> enqueue outputQ (ONext strm next) pri
     dataFrameHeadr len sid mnext = encodeFrameHeader FrameData hinfo
       where
-        hinfo = FrameHeader len flag (toStreamIdentifier sid)
+        hinfo = FrameHeader len flag sid
         flag = case mnext of
             Nothing -> setEndStream defaultFlags
             Just _  -> defaultFlags

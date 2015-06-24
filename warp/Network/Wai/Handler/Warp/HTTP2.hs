@@ -63,4 +63,4 @@ http2 conn ii addr transport settings src app = do
 goaway :: Connection -> ErrorCodeId -> ByteString -> IO ()
 goaway Connection{..} etype debugmsg = connSendAll bytestream
   where
-    bytestream = goawayFrame (toStreamIdentifier 0) etype debugmsg
+    bytestream = goawayFrame 0 etype debugmsg

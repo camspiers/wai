@@ -21,16 +21,16 @@ output Context{..} strm rsp pri = do
 
 ----------------------------------------------------------------
 
-goawayFrame :: StreamIdentifier -> ErrorCodeId -> ByteString -> ByteString
+goawayFrame :: StreamId -> ErrorCodeId -> ByteString -> ByteString
 goawayFrame sid etype debugmsg = encodeFrame einfo frame
   where
     einfo = encodeInfo id 0
     frame = GoAwayFrame sid etype debugmsg
 
-resetFrame :: ErrorCodeId -> StreamIdentifier -> ByteString
+resetFrame :: ErrorCodeId -> StreamId -> ByteString
 resetFrame etype sid = encodeFrame einfo frame
   where
-    einfo = encodeInfo id $ fromStreamIdentifier sid
+    einfo = encodeInfo id sid
     frame = RSTStreamFrame etype
 
 settingsFrame :: (FrameFlags -> FrameFlags) -> SettingsList -> ByteString

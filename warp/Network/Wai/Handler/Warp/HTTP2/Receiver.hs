@@ -29,7 +29,7 @@ frameReceiver ctx@Context{..} mkreq src =
   where
     sendGoaway (ConnectionError err msg) = do
         csid <- readIORef currentStreamId
-        let frame = goawayFrame (toStreamIdentifier csid) err msg
+        let frame = goawayFrame csid err msg
         enqueue outputQ (OFrame frame) highestPriority
         enqueue outputQ OFinish highestPriority
     sendGoaway _                         = return ()
@@ -128,25 +128,24 @@ frameReceiver ctx@Context{..} mkreq src =
                    | sid == streamId && ftyp == FrameContinuation -> return ()
                    | otherwise -> E.throwIO $ ConnectionError ProtocolError "continuation frame must follow"
          getStream = do
-             let stid = fromStreamIdentifier streamId
              csid <- readIORef currentStreamId
              when (ftyp == FrameHeaders) $
-               if stid <= csid then
+               if streamId <= csid then
                    E.throwIO $ ConnectionError ProtocolError "stream identifier must not decrease"
                  else
-                   writeIORef currentStreamId stid
+                   writeIORef currentStreamId streamId
              m0 <- readIORef streamTable
-             case M.lookup stid m0 of
+             case M.lookup streamId m0 of
                  Just strm0 -> return strm0
                  Nothing -> do
                      when (ftyp `notElem` [FrameHeaders,FramePriority]) $
                          E.throwIO $ ConnectionError ProtocolError "this frame is not allowed in an idel stream"
                      cnt <- readIORef concurrency
-                     when (cnt >= defaultConcurrency) $
+                     when (cnt >= recommendedConcurrency) $
                          E.throwIO $ StreamError RefusedStream streamId
                      ws <- initialWindowSize <$> readIORef http2settings
-                     newstrm <- newStream stid (fromIntegral ws)
-                     let m1 = M.insert stid newstrm m0
+                     newstrm <- newStream streamId (fromIntegral ws)
+                     let m1 = M.insert streamId newstrm m0
                      writeIORef streamTable m1
                      atomicModifyIORef' concurrency $ \x -> (x+1, ())
                      return newstrm
@@ -216,13 +215,12 @@ guardIt x = case x of
     Left err    -> E.throwIO err
     Right frame -> return frame
 
-checkPriority :: Priority -> Int -> IO ()
-checkPriority p n
+checkPriority :: Priority -> StreamId -> IO ()
+checkPriority p me
   | dep == me = E.throwIO $ StreamError ProtocolError me
   | otherwise = return ()
   where
     dep = streamDependency p
-    me  = toStreamIdentifier n
 
 stream :: FrameTypeId -> FrameHeader -> ByteString -> Context -> StreamState -> Stream -> IO StreamState
 stream FrameHeaders header@FrameHeader{..} bs ctx Idle Stream{..} = do

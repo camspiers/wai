@@ -49,8 +49,8 @@ data Context = Context {
     http2settings      :: IORef Settings
   , streamTable        :: IORef StreamTable
   , concurrency        :: IORef Int
-  , continued          :: IORef (Maybe StreamIdentifier)
-  , currentStreamId    :: IORef Int
+  , continued          :: IORef (Maybe StreamId)
+  , currentStreamId    :: IORef StreamId
   , inputQ             :: TQueue Input
   , outputQ            :: PriorityTree Output
   , encodeDynamicTable :: IORef DynamicTable
@@ -99,7 +99,7 @@ instance Show StreamState where
 ----------------------------------------------------------------
 
 data Stream = Stream {
-    streamNumber        :: Int
+    streamNumber        :: StreamId
   , streamState         :: IORef StreamState
   -- Next two fields are for error checking.
   , streamContentLength :: IORef (Maybe Int)
@@ -107,13 +107,8 @@ data Stream = Stream {
   , streamWindow        :: TVar WindowSize
   }
 
-newStream :: Int -> WindowSize -> IO Stream
+newStream :: StreamId -> WindowSize -> IO Stream
 newStream sid win = Stream sid <$> newIORef Idle
                                <*> newIORef Nothing
                                <*> newIORef 0
                                <*> newTVarIO win
-
-----------------------------------------------------------------
-
-defaultConcurrency :: Int
-defaultConcurrency = 100
