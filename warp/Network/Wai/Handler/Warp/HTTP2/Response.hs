@@ -3,16 +3,21 @@
 
 module Network.Wai.Handler.Warp.HTTP2.Response where
 
-import Control.Concurrent.STM
 import Data.ByteString (ByteString)
 import Network.HTTP2
+import Network.HTTP2.Priority
 import Network.Wai
 import Network.Wai.Handler.Warp.HTTP2.Types
 import Network.Wai.Internal (ResponseReceived(..))
 
 ----------------------------------------------------------------
 
-type Responder = Stream -> Response -> IO ResponseReceived
+type Responder = Stream -> Response -> Priority -> IO ResponseReceived
+
+output :: Context -> Responder
+output Context{..} strm rsp pri = do
+    enqueue outputQ (OResponse strm rsp) pri
+    return ResponseReceived
 
 ----------------------------------------------------------------
 
@@ -37,10 +42,3 @@ pingFrame :: ByteString -> ByteString
 pingFrame bs = encodeFrame einfo $ PingFrame bs
   where
     einfo = encodeInfo setAck 0
-
-----------------------------------------------------------------
-
-output :: Context -> Stream -> Response -> IO ResponseReceived
-output Context{..} strm rsp = do
-    atomically $ writeTQueue outputQ (OResponse strm rsp)
-    return ResponseReceived

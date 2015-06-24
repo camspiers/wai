@@ -17,6 +17,7 @@ import Network.Wai (Request, Response)
 import Network.Wai.Handler.Warp.Types
 
 import Network.HTTP2
+import Network.HTTP2.Priority
 import Network.HPACK
 
 ----------------------------------------------------------------
@@ -36,7 +37,7 @@ isHTTP2 tls = useHTTP2
 
 data Next = Next Int (Maybe (WindowSize -> IO Next))
 
-data Input = Input Stream Request
+data Input = Input Stream Request Priority
 data Output = OFinish
             | OResponse Stream Response
             | OFrame ByteString
@@ -51,7 +52,7 @@ data Context = Context {
   , continued          :: IORef (Maybe StreamIdentifier)
   , currentStreamId    :: IORef Int
   , inputQ             :: TQueue Input
-  , outputQ            :: TQueue Output
+  , outputQ            :: PriorityTree Output
   , encodeDynamicTable :: IORef DynamicTable
   , decodeDynamicTable :: IORef DynamicTable
   , wait               :: MVar ()
@@ -67,7 +68,7 @@ newContext = Context <$> newIORef defaultSettings
                      <*> newIORef Nothing
                      <*> newIORef 0
                      <*> newTQueueIO
-                     <*> newTQueueIO
+                     <*> newPriorityTree
                      <*> (newDynamicTableForEncoding 4096 >>= newIORef)
                      <*> (newDynamicTableForDecoding 4096 >>= newIORef)
                      <*> newEmptyMVar
@@ -79,21 +80,21 @@ data ClosedCode = Finished | Killed | Reset ErrorCodeId deriving Show
 
 data StreamState =
     Idle
-  | Continued [HeaderBlockFragment] Bool
-  | NoBody HeaderList
-  | HasBody HeaderList
+  | Continued [HeaderBlockFragment] Bool Priority
+  | NoBody HeaderList Priority
+  | HasBody HeaderList Priority
   | Body (TQueue ByteString)
   | HalfClosed
   | Closed ClosedCode
 
 instance Show StreamState where
-    show Idle            = "Idle"
-    show (Continued _ _) = "Continued"
-    show (NoBody  _)     = "NoBody"
-    show (HasBody _)     = "HasBody"
-    show (Body _)        = "Body"
-    show HalfClosed      = "HalfClosed"
-    show (Closed e)      = "Closed: " ++ show e
+    show Idle              = "Idle"
+    show (Continued _ _ _) = "Continued"
+    show (NoBody  _ _)     = "NoBody"
+    show (HasBody _ _)     = "HasBody"
+    show (Body    _)       = "Body"
+    show HalfClosed        = "HalfClosed"
+    show (Closed e)        = "Closed: " ++ show e
 
 ----------------------------------------------------------------
 

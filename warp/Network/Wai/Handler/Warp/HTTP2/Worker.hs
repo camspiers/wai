@@ -27,11 +27,11 @@ worker Context{..} tm app responder = do
         go th ref `E.catch` gonext th ref
   where
     go th ref = forever $ do
-        Input strm req <- atomically $ readTQueue inputQ
+        Input strm req pri <- atomically $ readTQueue inputQ
         T.tickle th
         writeIORef ref (Just strm)
         -- fixme: what about IO errors?
-        void $ app req $ responder strm
+        void $ app req $ \out -> responder strm out pri
     gonext th ref Break = doit `E.catch` gonext th ref
       where
         doit = do

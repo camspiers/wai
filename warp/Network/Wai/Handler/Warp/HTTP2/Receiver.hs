@@ -18,6 +18,7 @@ import Network.Wai.Handler.Warp.IORef
 import Network.Wai.Handler.Warp.Types
 
 import Network.HTTP2
+import Network.HTTP2.Priority
 import Network.HPACK
 
 ----------------------------------------------------------------
@@ -29,19 +30,18 @@ frameReceiver ctx@Context{..} mkreq src =
     sendGoaway (ConnectionError err msg) = do
         csid <- readIORef currentStreamId
         let frame = goawayFrame (toStreamIdentifier csid) err msg
-        atomically $ do
-            writeTQueue outputQ (OFrame frame)
-            writeTQueue outputQ OFinish
+        enqueue outputQ (OFrame frame) highestPriority
+        enqueue outputQ OFinish highestPriority
     sendGoaway _                         = return ()
 
     sendReset err sid = do
         let frame = resetFrame err sid
-        atomically $ writeTQueue outputQ (OFrame frame)
+        enqueue outputQ (OFrame frame) highestPriority
 
     loop = do
         hd <- readBytes frameHeaderLength
         if BS.null hd then
-            atomically $ writeTQueue outputQ OFinish
+            enqueue outputQ OFinish highestPriority
           else do
             cont <- guardError $ decodeFrameHeader hd
             when cont loop
@@ -88,7 +88,7 @@ frameReceiver ctx@Context{..} mkreq src =
           state <- readIORef streamState
           state' <- stream ftyp header pl ctx state strm
           case state' of
-              NoBody hdr -> do
+              NoBody hdr pri -> do
                   resetContinued
                   case validateHeaders hdr of
                       Just vh -> do
@@ -96,9 +96,9 @@ frameReceiver ctx@Context{..} mkreq src =
                               E.throwIO $ StreamError ProtocolError streamId
                           writeIORef streamState HalfClosed
                           let req = mkreq vh (return "")
-                          atomically $ writeTQueue inputQ $ Input strm req
+                          atomically $ writeTQueue inputQ $ Input strm req pri
                       Nothing -> E.throwIO $ StreamError ProtocolError streamId
-              HasBody hdr -> do
+              HasBody hdr pri -> do
                   resetContinued
                   case validateHeaders hdr of
                       Just vh -> do
@@ -108,9 +108,9 @@ frameReceiver ctx@Context{..} mkreq src =
                           readQ <- newReadBody q
                           bodySource <- mkSource readQ
                           let req = mkreq vh (readSource bodySource)
-                          atomically $ writeTQueue inputQ $ Input strm req
+                          atomically $ writeTQueue inputQ $ Input strm req pri
                       Nothing -> E.throwIO $ StreamError ProtocolError streamId
-              s@(Continued _ _) -> do
+              s@(Continued _ _ _) -> do
                   setContinued
                   writeIORef streamState s
               s -> do -- Body, HalfClosed, Idle, Closed
@@ -183,7 +183,7 @@ control FrameSettings header@FrameHeader{..} bs Context{..} = do
     unless (testAck flags) $ do
         modifyIORef http2settings $ \old -> updateSettings old alist
         let frame = settingsFrame setAck []
-        atomically $ writeTQueue outputQ (OFrame frame)
+        enqueue outputQ (OFrame frame) highestPriority
     return True
 
 control FramePing FrameHeader{..} bs Context{..} =
@@ -191,11 +191,11 @@ control FramePing FrameHeader{..} bs Context{..} =
         E.throwIO $ ConnectionError ProtocolError "the ack flag of this ping frame must not be set"
       else do
         let frame = pingFrame bs
-        atomically $ writeTQueue outputQ (OFrame frame)
+        enqueue outputQ (OFrame frame) defaultPriority
         return True
 
 control FrameGoAway _ _ Context{..} = do
-    atomically $ writeTQueue outputQ OFinish
+    enqueue outputQ OFinish highestPriority
     return False
 
 control FrameWindowUpdate header@FrameHeader{..} bs Context{..} = do
@@ -227,17 +227,18 @@ checkPriority p n
 stream :: FrameTypeId -> FrameHeader -> ByteString -> Context -> StreamState -> Stream -> IO StreamState
 stream FrameHeaders header@FrameHeader{..} bs ctx Idle Stream{..} = do
     HeadersFrame mp frag <- guardIt $ decodeHeadersFrame header bs
-    case mp of
-        Nothing -> return ()
+    pri <- case mp of
+        Nothing -> return defaultPriority
         Just p  -> do
             checkPriority p streamNumber
+            return p
     let endOfStream = testEndStream flags
         endOfHeader = testEndHeader flags
     if endOfHeader then do
         hdr <- decodeHeaderBlock frag ctx
-        return $ if endOfStream then NoBody hdr else HasBody hdr
+        return $ if endOfStream then NoBody hdr pri else HasBody hdr pri
       else
-        return $ Continued [frag] endOfStream
+        return $ Continued [frag] endOfStream pri
 
 stream FrameData header@FrameHeader{..} bs _ s@(Body q) Stream{..} = do
     DataFrame body <- guardIt $ decodeDataFrame header bs
@@ -257,15 +258,15 @@ stream FrameData header@FrameHeader{..} bs _ s@(Body q) Stream{..} = do
       else
         return s
 
-stream FrameContinuation FrameHeader{..} frag ctx (Continued rfrags endOfStream) _ = do
+stream FrameContinuation FrameHeader{..} frag ctx (Continued rfrags endOfStream pri) _ = do
     let endOfHeader = testEndHeader flags
         rfrags' = frag : rfrags
     if endOfHeader then do
         let hdrblk = BS.concat $ reverse rfrags'
         hdr <- decodeHeaderBlock hdrblk ctx
-        return $ if endOfStream then NoBody hdr else HasBody hdr
+        return $ if endOfStream then NoBody hdr pri else HasBody hdr pri
       else
-        return $ Continued rfrags' endOfStream
+        return $ Continued rfrags' endOfStream pri
 
 stream FrameContinuation _ _ _ _ _ = E.throwIO $ ConnectionError ProtocolError "continue frame cannot come here"
 
@@ -281,13 +282,14 @@ stream FrameRSTStream header bs _ _ Stream{..} = do
     RSTStreamFrame e <- guardIt $ decoderstStreamFrame header bs
     return $ Closed (Reset e) -- will be written to streamState
 
-stream FramePriority header bs _ s Stream{..} = do
+stream FramePriority header bs Context{..} s Stream{..} = do
     PriorityFrame p <- guardIt $ decodePriorityFrame header bs
     checkPriority p streamNumber
+    prepare outputQ streamNumber p
     return s
 
     -- this ordering is important
-stream _ _ _ _ (Continued _ _) _ = E.throwIO $ ConnectionError ProtocolError "an illegal frame follows header/continuation frames"
+stream _ _ _ _ (Continued _ _ _) _ = E.throwIO $ ConnectionError ProtocolError "an illegal frame follows header/continuation frames"
 stream FrameData FrameHeader{..} _ _ _ _ = E.throwIO $ StreamError StreamClosed streamId
 stream _ FrameHeader{..} _ _ _ _ = E.throwIO $ StreamError ProtocolError streamId
 

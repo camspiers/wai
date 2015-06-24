@@ -12,6 +12,7 @@ import Data.IORef (readIORef, writeIORef)
 import Foreign.C.Types
 import Foreign.Ptr
 import Network.HTTP2
+import Network.HTTP2.Priority
 import Network.Wai
 import Network.Wai.Handler.Warp.Buffer
 import Network.Wai.Handler.Warp.FdCache
@@ -32,18 +33,19 @@ unlessClosed Stream{..} body = do
         Closed _ -> return ()
         _        -> body
 
-checkWindowSize :: TVar WindowSize -> TVar WindowSize -> TQueue Output -> Output -> (WindowSize -> IO ()) -> IO ()
-checkWindowSize connWindow strmWindow outQ out body = do
+checkWindowSize :: TVar WindowSize -> TVar WindowSize -> PriorityTree Output -> Output -> Priority -> (WindowSize -> IO ()) -> IO ()
+checkWindowSize connWindow strmWindow outQ out pri body = do
    cw <- atomically $ do
        w <- readTVar connWindow
        check (w > 0)
        return w
    sw <- atomically $ readTVar strmWindow
    if sw == 0 then do
-       void $ forkIO $ atomically $ do
-           x <- readTVar strmWindow
-           check (x > 0)
-           writeTQueue outQ out
+       void $ forkIO $ do
+           atomically $ do
+               x <- readTVar strmWindow
+               check (x > 0)
+           enqueue outQ out pri
      else
        body (min cw sw)
 
@@ -54,13 +56,13 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
   where
     initialSettings = [(SettingsMaxConcurrentStreams,defaultConcurrency)]
     initialFrame = settingsFrame id initialSettings
-    loop = atomically (readTQueue outputQ) >>= switch
-    switch OFinish        = return ()
-    switch (OFrame frame) = do
+    loop = dequeue outputQ >>= \(out, pri) -> switch out pri
+    switch OFinish        _ = return ()
+    switch (OFrame frame) _ = do
         connSendAll frame
         loop
-    switch out@(OResponse strm rsp) = unlessClosed strm $ do
-        checkWindowSize connectionWindow (streamWindow strm) outputQ out $ \lim -> do
+    switch out@(OResponse strm rsp) pri = unlessClosed strm $ do
+        checkWindowSize connectionWindow (streamWindow strm) outputQ out pri $ \lim -> do
             -- Header frame
             let sid = streamNumber strm
             hdrframe <- headerFrame ctx ii settings sid rsp
@@ -70,15 +72,15 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
             let otherLen = BS.length hdrframe
                 datPayloadOff = otherLen + frameHeaderLength
             Next datPayloadLen mnext <- responseToNext conn ii datPayloadOff lim rsp
-            fillSend strm otherLen datPayloadLen mnext
+            fillSend strm otherLen datPayloadLen mnext pri
         loop
-    switch out@(ONext strm curr) = unlessClosed strm $ do
-        checkWindowSize connectionWindow (streamWindow strm) outputQ out $ \lim -> do
+    switch out@(ONext strm curr) pri = unlessClosed strm $ do
+        checkWindowSize connectionWindow (streamWindow strm) outputQ out pri $ \lim -> do
             -- Data frame
             Next datPayloadLen mnext <- curr lim
-            fillSend strm 0 datPayloadLen mnext
+            fillSend strm 0 datPayloadLen mnext pri
         loop
-    fillSend strm otherLen datPayloadLen mnext = do
+    fillSend strm otherLen datPayloadLen mnext pri = do
         -- fixme: length check
         let sid = streamNumber strm
             dathdr = dataFrameHeadr datPayloadLen sid mnext
@@ -91,7 +93,7 @@ frameSender ctx@Context{..} conn@Connection{..} ii settings = do
            modifyTVar' (streamWindow strm) (subtract datPayloadLen)
         case mnext of
             Nothing   -> writeIORef (streamState strm) (Closed Finished)
-            Just next -> atomically $ writeTQueue outputQ (ONext strm next)
+            Just next -> enqueue outputQ (ONext strm next) pri
     dataFrameHeadr len sid mnext = encodeFrameHeader FrameData hinfo
       where
         hinfo = FrameHeader len flag (toStreamIdentifier sid)
