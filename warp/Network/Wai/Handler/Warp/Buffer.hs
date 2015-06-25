@@ -7,12 +7,13 @@ module Network.Wai.Handler.Warp.Buffer (
   , newBufferPool
   , withBufferPool
   , spell
+  , fill
   , toBlazeBuffer
   , copy
   , toBS
   ) where
 
-import Control.Monad (when)
+import Control.Monad (when, void)
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal
 import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
@@ -95,17 +96,35 @@ withBufferPool pool f = do
 
 ----------------------------------------------------------------
 
-spell :: ByteString -> BufSize -> (Buffer -> BufSize -> IO ()) -> IO (ByteString, ByteString)
-spell initial siz fill
+spell :: ByteString -> BufSize -> IO ByteString -> (Buffer -> BufSize -> IO ()) -> IO (ByteString, ByteString)
+spell initial siz recv recvBuf
   | len0 >= siz = return $ BS.splitAt siz initial
+  | siz <= 4096 = do
+      bs <- recv
+      let (bs1, leftover) = BS.splitAt (siz - len0) bs
+      return (BS.append initial bs1, leftover)
   | otherwise = do
       bs@(PS fptr _ _) <- mallocBuffer siz
+      putStrLn $ "malloc(): " ++ show siz
       withForeignPtr fptr $ \ptr -> do
           ptr' <- copy ptr initial
-          fill ptr' (siz - len0)
+          recvBuf ptr' (siz - len0)
           return (bs, "")
   where
     len0 = BS.length initial
+
+fill :: ByteString -> Buffer -> BufSize -> IO ByteString -> IO ByteString
+fill bs buf siz recv
+  | len >= siz = do
+      let (bs', leftover) = BS.splitAt siz bs
+      void $ copy buf bs'
+      return leftover
+  | otherwise = do
+      buf' <- copy buf bs
+      bs' <- recv
+      fill bs' buf' (siz - len) recv
+  where
+    len = BS.length bs
 
 ----------------------------------------------------------------
 --

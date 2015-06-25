@@ -290,7 +290,8 @@ httpOverTls TLSSettings{..} s cachedRef params = do
     TLS.handshake ctx
     writeBuf <- allocateBuffer bufferSize
     tls <- getTLSinfo ctx
-    return (conn ctx writeBuf, tls)
+    ref <- I.newIORef ""
+    return (conn ctx writeBuf ref, tls)
   where
     backend = TLS.Backend {
         TLS.backendFlush = return ()
@@ -298,12 +299,13 @@ httpOverTls TLSSettings{..} s cachedRef params = do
       , TLS.backendSend  = sendAll s
       , TLS.backendRecv  = recvTLS cachedRef s
       }
-    conn ctx writeBuf = Connection {
+    conn ctx writeBuf ref = Connection {
         connSendMany         = TLS.sendData ctx . L.fromChunks
       , connSendAll          = sendall
       , connSendFile         = sendfile
       , connClose            = close
       , connRecv             = recv
+      , connRecvBuf          = recvBuf ref
       , connWriteBuffer      = writeBuf
       , connBufferSize       = bufferSize
       }
@@ -327,6 +329,11 @@ httpOverTls TLSSettings{..} s cachedRef params = do
                     go
                   else
                     return x
+
+        recvBuf cref buf siz = do
+            cached <- I.readIORef cref
+            leftover <- fill cached buf siz recv
+            I.writeIORef cref leftover
 
 getTLSinfo :: TLS.Context -> IO Transport
 getTLSinfo ctx = do
@@ -372,7 +379,7 @@ plainHTTP TLSSettings{..} s cachedRef = case onInsecure of
 recvTLS :: I.IORef B.ByteString -> Socket -> Int -> IO B.ByteString
 recvTLS cachedRef s size = do
     cached <- I.readIORef cachedRef
-    (bs, leftover) <- spell cached size (receiveBuf s)
+    (bs, leftover) <- spell cached size (receive s undefined) (receiveBuf s)
     I.writeIORef cachedRef leftover
     return bs
 

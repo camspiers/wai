@@ -9,11 +9,12 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.IORef (IORef, newIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as M
 import qualified Network.HTTP.Types as H
 import Network.Wai (Request, Response)
+import Network.Wai.Handler.Warp.Buffer
+import Network.Wai.Handler.Warp.IORef
 import Network.Wai.Handler.Warp.Types
 
 import Network.HTTP2
@@ -113,3 +114,22 @@ newStream sid win = Stream sid <$> newIORef Idle
                                <*> newIORef Nothing
                                <*> newIORef 0
                                <*> newTVarIO win
+
+----------------------------------------------------------------
+
+data Source2 = Source2 !(IORef ByteString) !(IO ByteString) !RecvBuf
+
+mkSource2 :: ByteString -> IO ByteString -> RecvBuf -> IO Source2
+mkSource2 initial recv recvBuf = do
+    ref <- newIORef initial
+    return $! Source2 ref recv recvBuf
+
+readSource2 :: Source2 -> Int -> IO ByteString
+readSource2 (Source2 ref recv recvBuf) size = do
+    cached <- readIORef ref
+    (bs, leftover) <- spell cached size recv recvBuf
+    writeIORef ref leftover
+    return bs
+
+leftoverSource2 :: Source2 -> ByteString -> IO ()
+leftoverSource2 (Source2 ref _ _) bs = writeIORef ref bs

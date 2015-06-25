@@ -19,6 +19,8 @@ module Network.Wai.Handler.Warp.Internal (
   , allocateBuffer
   , freeBuffer
   , spell
+  , fill
+  , receive
   , receiveBuf
     -- ** Sendfile
   , FileId (..)

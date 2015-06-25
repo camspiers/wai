@@ -24,7 +24,7 @@ import Network.HPACK
 
 ----------------------------------------------------------------
 
-frameReceiver :: Context -> MkReq -> Source -> IO ()
+frameReceiver :: Context -> MkReq -> Source2 -> IO ()
 frameReceiver ctx@Context{..} mkreq src =
     E.handle sendGoaway loop `E.finally` takeMVar wait
   where
@@ -151,25 +151,7 @@ frameReceiver ctx@Context{..} mkreq src =
                      return newstrm
 
     consume = void . readBytes
-
-    readBytes len = do
-        bs0 <- readSource src
-        let len0 = BS.length bs0
-        if len0 == 0 then
-            return bs0 -- EOF
-          else if len0 >= len then do
-            let (!frame,!left0) = BS.splitAt len bs0
-            leftoverSource src left0
-            return frame
-          else do
-            bs1 <- readSource src
-            let len1 = BS.length bs1
-            if len0 + len1 >= len then do
-                let (!bs1',!left1) = BS.splitAt (len - len0) bs1
-                leftoverSource src left1
-                return $ BS.append bs0 bs1'
-              else
-                E.throwIO $ ConnectionError FrameSizeError "not enough frame size"
+    readBytes len = readSource2 src len
 
 ----------------------------------------------------------------
 

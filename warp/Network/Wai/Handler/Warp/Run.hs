@@ -58,6 +58,7 @@ socketConnection s = do
       , connSendFile = sendFile s writeBuf bufferSize sendall
       , connClose = sClose s >> freeBuffer writeBuf
       , connRecv = receive s bufferPool
+      , connRecvBuf = receiveBuf s
       , connWriteBuffer = writeBuf
       , connBufferSize = bufferSize
       }
@@ -298,20 +299,26 @@ serveConnection :: Connection
                 -> Application
                 -> IO ()
 serveConnection conn ii origAddr transport settings app = do
-    istatus <- newIORef False
-    src <- mkSource (wrappedRecv conn th istatus)
-    addr <- getProxyProtocolAddr src
-    if isHTTP2 transport then
-        http2 conn ii addr transport settings src app
+    (h2,bs) <- if isHTTP2 transport then
+                   return (True, "")
+               else do
+                   bs0 <- connRecv conn
+                   if S.length bs0 >= 4 && S.isPrefixOf "PRI " bs0 then
+                       return (True, bs0)
+                     else
+                       return (False, bs0)
+    if h2 then do
+        src2 <- mkSource2 bs (connRecv conn) (connRecvBuf conn)
+        -- fixme: origAddr
+        http2 conn ii origAddr transport settings src2 app
       else do
-        bs <- readSource src
+        istatus <- newIORef False
+        src <- mkSource (wrappedRecv conn th istatus)
+        addr <- getProxyProtocolAddr src
         leftoverSource src bs
-        if S.length bs >= 4 && S.isPrefixOf "PRI " bs then
-            http2 conn ii addr transport settings src app
-          else
-            http1 addr istatus src `E.catch` \e -> do
-                sendErrorResponse addr istatus e
-                throwIO (e :: SomeException)
+        http1 addr istatus src `E.catch` \e -> do
+            sendErrorResponse addr istatus e
+            throwIO (e :: SomeException)
   where
     getProxyProtocolAddr src =
         case settingsProxyProtocol settings of
