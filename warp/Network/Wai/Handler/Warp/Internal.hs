@@ -18,6 +18,8 @@ module Network.Wai.Handler.Warp.Internal (
   , bufferSize
   , allocateBuffer
   , freeBuffer
+  , spell
+  , receiveBuf
     -- ** Sendfile
   , FileId (..)
   , SendFile
@@ -63,6 +65,7 @@ import Network.Wai.Handler.Warp.Buffer
 import Network.Wai.Handler.Warp.Date
 import Network.Wai.Handler.Warp.FdCache
 import Network.Wai.Handler.Warp.Header
+import Network.Wai.Handler.Warp.Recv
 import Network.Wai.Handler.Warp.Request
 import Network.Wai.Handler.Warp.Response
 import Network.Wai.Handler.Warp.Run

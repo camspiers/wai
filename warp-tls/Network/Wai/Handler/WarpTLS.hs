@@ -51,6 +51,7 @@ import qualified Network.TLS as TLS
 import qualified Network.TLS.Extra as TLSExtra
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp
+import Network.Wai.Handler.Warp.Internal
 import System.IO.Error (isEOFError)
 
 ----------------------------------------------------------------
@@ -358,20 +359,9 @@ plainHTTP TLSSettings{..} s cachedRef = case onInsecure of
 recvTLS :: I.IORef B.ByteString -> Socket -> Int -> IO B.ByteString
 recvTLS cachedRef s size = do
     cached <- I.readIORef cachedRef
-    loop cached
-  where
-    loop bs | B.length bs >= size = do
-        let (x, y) = B.splitAt size bs
-        I.writeIORef cachedRef y
-        return x
-    loop bs1 = do
-        bs2 <- safeRecv s 4096
-        if B.null bs2 then do
-            -- FIXME does this deserve an exception being thrown?
-            I.writeIORef cachedRef B.empty
-            return bs1
-          else
-            loop $ B.append bs1 bs2
+    (bs, leftover) <- spell cached size (receiveBuf s)
+    I.writeIORef cachedRef leftover
+    return bs
 
 ----------------------------------------------------------------
 

@@ -298,7 +298,7 @@ serveConnection :: Connection
                 -> IO ()
 serveConnection conn ii origAddr transport settings app = do
     istatus <- newIORef False
-    src <- mkSource (connSource conn th istatus)
+    src <- mkSource (wrappedRecv conn th istatus)
     addr <- getProxyProtocolAddr src
     http1 addr istatus src `E.catch` \e -> do
         sendErrorResponse addr istatus e
@@ -453,8 +453,8 @@ flushBody src =
                 | toRead' >= 0 -> loop toRead'
                 | otherwise -> return False
 
-connSource :: Connection -> T.Handle -> IORef Bool -> IO ByteString
-connSource Connection { connRecv = recv } th istatus = do
+wrappedRecv :: Connection -> T.Handle -> IORef Bool -> IO ByteString
+wrappedRecv Connection { connRecv = recv } th istatus = do
     bs <- recv
     unless (S.null bs) $ do
         writeIORef istatus True

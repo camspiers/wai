@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings #-}
 
 module Network.Wai.Handler.Warp.Buffer (
     bufferSize
@@ -6,6 +6,7 @@ module Network.Wai.Handler.Warp.Buffer (
   , freeBuffer
   , newBufferPool
   , withBufferPool
+  , spell
   , toBlazeBuffer
   , copy
   , toBS
@@ -91,6 +92,20 @@ withBufferPool pool f = do
     putBuffer pool $! unsafeDrop consumed buffer
     return $! unsafeTake consumed buffer
 {-# INLINE withBufferPool #-}
+
+----------------------------------------------------------------
+
+spell :: ByteString -> BufSize -> (Buffer -> BufSize -> IO ()) -> IO (ByteString, ByteString)
+spell initial siz fill
+  | len0 >= siz = return $ BS.splitAt siz initial
+  | otherwise = do
+      bs@(PS fptr _ _) <- mallocBuffer siz
+      withForeignPtr fptr $ \ptr -> do
+          ptr' <- copy ptr initial
+          fill ptr' (siz - len0)
+          return (bs, "")
+  where
+    len0 = BS.length initial
 
 ----------------------------------------------------------------
 --

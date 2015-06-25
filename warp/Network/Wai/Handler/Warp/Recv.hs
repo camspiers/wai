@@ -3,6 +3,7 @@
 
 module Network.Wai.Handler.Warp.Recv (
     receive
+  , receiveBuf
   ) where
 
 #if __GLASGOW_HASKELL__ < 709
@@ -12,7 +13,7 @@ import Data.ByteString (ByteString)
 import Data.Word (Word8)
 import Foreign.C.Error (eAGAIN, getErrno, throwErrno)
 import Foreign.C.Types
-import Foreign.Ptr (Ptr, castPtr)
+import Foreign.Ptr (Ptr, castPtr, plusPtr)
 import GHC.Conc (threadWaitRead)
 import Network.Socket (Socket, fdSocket)
 import Network.Wai.Handler.Warp.Types
@@ -31,6 +32,15 @@ receive sock pool = withBufferPool pool $ \ (ptr, size) -> do
     let sock' = fdSocket sock
         size' = fromIntegral size
     fromIntegral <$> receiveloop sock' ptr size'
+
+receiveBuf :: Socket -> Buffer -> BufSize -> IO ()
+receiveBuf sock buf0 siz0 = loop buf0 siz0
+  where
+    loop _   0   = return ()
+    loop buf siz = do
+        n <- fromIntegral <$> receiveloop fd buf (fromIntegral siz)
+        loop (buf `plusPtr` n) (siz - n)
+    fd = fdSocket sock
 
 receiveloop :: CInt -> Ptr Word8 -> CSize -> IO CInt
 receiveloop sock ptr size = do
